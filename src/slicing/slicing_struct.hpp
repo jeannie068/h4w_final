@@ -90,10 +90,10 @@ public:
     // Member variables
     int type;
     Block* block;
-    SlicingTreeNode* leftChild;
-    SlicingTreeNode* rightChild;
+    std::shared_ptr<SlicingTreeNode> leftChild;
+    std::shared_ptr<SlicingTreeNode> rightChild;
     std::vector<ShapeRecord> shapeRecords;
-    void* userData;
+    // void* userData;
 };
 
 // Solution representation for the floorplan
@@ -120,7 +120,7 @@ private:
     int cost;
     
     // Build slicing tree from polish expression
-    SlicingTreeNode* buildSlicingTree();
+    std::shared_ptr<SlicingTreeNode> buildSlicingTree();
     
     // Set positions of blocks based on slicing tree
     void setBlockPositions(SlicingTreeNode* node, int x, int y, int recordIndex);

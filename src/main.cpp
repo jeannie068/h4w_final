@@ -140,8 +140,8 @@ int main(int argc, char* argv[]) {
     // Set random seed for reproducibility
     solver.setRandomSeed(static_cast<unsigned int>(time(nullptr)));
     
-    // Set time limit to 240 seconds (4:00) to ensure completion within 5 minutes
-    solver.setTimeLimit(240);
+    // Set time limit to 260 seconds (4:00) to ensure completion within 5 minutes
+    solver.setTimeLimit(260);
     
     // Solve the placement problem
     Logger::init("placement_debug.log");

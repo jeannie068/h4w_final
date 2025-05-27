@@ -112,19 +112,37 @@ SimulatedAnnealing::SimulatedAnnealing(FloorplanData* data)
 }
 
 SimulatedAnnealing::~SimulatedAnnealing() {
-    // Close log file
+    // Close log file first
     if (slicingLogFile.is_open()) {
         slicingLogFile.close();
     }
     
-    // Delete bestSolution which is owned exclusively by this class
-    delete bestSolution;
-
+    // Safe cleanup of bestSolution
+    try {
+        if (bestSolution) {
+            delete bestSolution;
+            bestSolution = nullptr;
+        }
+    } catch (const std::exception& e) {
+        // Log the error but don't crash
+        std::cerr << "Error destroying bestSolution: " << e.what() << std::endl;
+    } catch (...) {
+        // Catch any other exceptions
+        std::cerr << "Unknown error destroying bestSolution" << std::endl;
+    }
+    
+    // Clear the shared_ptr vectors safely
+    try {
+        blockNodes.clear();
+        cutNodes.clear();
+    } catch (...) {
+        // Ignore errors during cleanup
+    }
 }
 
 void SimulatedAnnealing::run() {
     auto startTime = std::chrono::high_resolution_clock::now();
-    double globalTimeLimit = 180.0; // 4 minutes total time limit
+    double globalTimeLimit = 230.0; // 4 minutes total time limit
     
     logSlicingPlacement("Starting simulated annealing algorithm for analog placement...");
     
@@ -786,7 +804,6 @@ vector<int> SimulatedAnnealing::perturbExpression(const vector<int>& expression,
 
 
 std::shared_ptr<SlicingTreeNode> SimulatedAnnealing::buildSlicingTree(const std::vector<int>& expression) {
-    size_t cutIndex = 0;
     std::stack<std::shared_ptr<SlicingTreeNode>> nodeStack;
     
     try {
@@ -796,7 +813,7 @@ std::shared_ptr<SlicingTreeNode> SimulatedAnnealing::buildSlicingTree(const std:
             return nullptr;
         }
         
-        // Basic validation of Polish expression
+        // Validate Polish expression
         int operands = 0;
         int operators = 0;
         for (int id : expression) {
@@ -806,31 +823,30 @@ std::shared_ptr<SlicingTreeNode> SimulatedAnnealing::buildSlicingTree(const std:
                 operators++;
             }
             
-            // Check balloting property
             if (operands <= operators) {
                 logSlicingPlacement("Error: Expression violates balloting property");
                 return nullptr;
             }
         }
         
-        // Final check: n operands and n-1 operators
         if (operands != operators + 1) {
             logSlicingPlacement("Error: Expression has invalid operand/operator count");
-            logSlicingPlacement("Operands: " + std::to_string(operands) + ", Operators: " + std::to_string(operators));
             return nullptr;
         }
         
-        // Process expression
+        // Process expression with safe memory management
         for (int id : expression) {
             if (!isCut(id)) {
-                // Ensure valid block index
-                if (id < 0 || id >= static_cast<int>(blockNodes.size())) {
+                // Validate block index
+                if (id < 0 || id >= data->getNumBlocks()) {
                     logSlicingPlacement("Error: Invalid block index: " + std::to_string(id));
                     return nullptr;
                 }
                 
-                // Store a copy of the shared_ptr in the stack
-                nodeStack.push(blockNodes[id]);
+                // Create new node for block
+                Block* block = data->getBlock(id);
+                auto blockNode = std::make_shared<SlicingTreeNode>(SlicingTreeNode::BLOCK, block);
+                nodeStack.push(blockNode);
             } else {
                 // Need at least 2 nodes for a cut
                 if (nodeStack.size() < 2) {
@@ -838,39 +854,21 @@ std::shared_ptr<SlicingTreeNode> SimulatedAnnealing::buildSlicingTree(const std:
                     return nullptr;
                 }
                 
-                // Ensure valid cut index
-                if (cutIndex >= cutNodes.size()) {
-                    logSlicingPlacement("Error: Cut index out of bounds: " + std::to_string(cutIndex));
-                    return nullptr;
-                }
-                
-                // Get the cut node and keep a copy of the shared_ptr
-                std::shared_ptr<SlicingTreeNode> cutNode = cutNodes[cutIndex++];
-                
-                // Safe handling of the stack
-                auto rightChild = nodeStack.top();
-                nodeStack.pop();
-                auto leftChild = nodeStack.top();
-                nodeStack.pop();
-                
-                // Set the cut node properties
+                // Create new cut node
+                auto cutNode = std::make_shared<SlicingTreeNode>();
                 cutNode->type = id;
-                cutNode->rightChild = rightChild.get(); // Still using raw pointer for child links
-                cutNode->leftChild = leftChild.get();   // Still using raw pointer for child links
+                cutNode->block = nullptr;
                 
-                // Keep the shared_ptrs in memory by storing them in the cut node
-                // Adding this custom field to track ownership
-                if (!cutNode->userData) {
-                    cutNode->userData = new std::vector<std::shared_ptr<SlicingTreeNode>>();
-                }
+                // Get children from stack
+                cutNode->rightChild = nodeStack.top();
+                nodeStack.pop();
+                cutNode->leftChild = nodeStack.top();
+                nodeStack.pop();
                 
-                // Store the shared pointers to maintain ownership
-                auto childPtrs = static_cast<std::vector<std::shared_ptr<SlicingTreeNode>>*>(cutNode->userData);
-                childPtrs->push_back(leftChild);
-                childPtrs->push_back(rightChild);
-                
-                // Update shape records and push to stack
+                // Update shape records
                 cutNode->updateShapeRecords();
+                
+                // Push the new node
                 nodeStack.push(cutNode);
             }
         }
@@ -883,53 +881,47 @@ std::shared_ptr<SlicingTreeNode> SimulatedAnnealing::buildSlicingTree(const std:
         
         return nodeStack.top();
     }
-    catch (const std::bad_alloc& e) {
-        logSlicingPlacement("Memory allocation failed in buildSlicingTree: " + std::string(e.what()));
-        // Clear stack to help with cleanup
-        while (!nodeStack.empty()) {
-            nodeStack.pop();
-        }
-        return nullptr;
-    }
     catch (const std::exception& e) {
         logSlicingPlacement("Exception in buildSlicingTree: " + std::string(e.what()));
-        // Clear stack to help with cleanup
-        while (!nodeStack.empty()) {
-            nodeStack.pop();
-        }
         return nullptr;
     }
     catch (...) {
         logSlicingPlacement("Unknown exception in buildSlicingTree");
-        // Clear stack to help with cleanup
-        while (!nodeStack.empty()) {
-            nodeStack.pop();
-        }
         return nullptr;
     }
 }
 
 void SimulatedAnnealing::setBlockPositions(SlicingTreeNode* node, int x, int y, int recordIndex) {
-    if (!node) return;
+    if (!node || recordIndex >= static_cast<int>(node->shapeRecords.size())) return;
     
     const ShapeRecord& record = node->shapeRecords[recordIndex];
     
     if (node->type == SlicingTreeNode::BLOCK) {
         // Update block position and rotation
-        node->block->updatePosition(x, y, record.width, record.height);
+        if (node->block) {
+            node->block->updatePosition(x, y, record.width, record.height);
+        }
     } else {
         // Process children
-        setBlockPositions(node->leftChild, x, y, record.leftChoice);
+        if (node->leftChild) {
+            setBlockPositions(node->leftChild.get(), x, y, record.leftChoice);
+        }
         
         if (node->type == SlicingTreeNode::HORIZONTAL_CUT) {
             // For horizontal cut, the right child is below the left child
-            y += node->leftChild->shapeRecords[record.leftChoice].height;
+            if (node->leftChild && record.leftChoice < static_cast<int>(node->leftChild->shapeRecords.size())) {
+                y += node->leftChild->shapeRecords[record.leftChoice].height;
+            }
         } else {  // VERTICAL_CUT
             // For vertical cut, the right child is to the right of the left child
-            x += node->leftChild->shapeRecords[record.leftChoice].width;
+            if (node->leftChild && record.leftChoice < static_cast<int>(node->leftChild->shapeRecords.size())) {
+                x += node->leftChild->shapeRecords[record.leftChoice].width;
+            }
         }
         
-        setBlockPositions(node->rightChild, x, y, record.rightChoice);
+        if (node->rightChild) {
+            setBlockPositions(node->rightChild.get(), x, y, record.rightChoice);
+        }
     }
 }
 

@@ -118,8 +118,7 @@ ShapeRecord::ShapeRecord(int w, int h, int lc, int rc)
 
 // SlicingTreeNode implementation
 SlicingTreeNode::SlicingTreeNode() 
-    : type(BLOCK), block(nullptr), leftChild(nullptr), rightChild(nullptr), userData(nullptr) {
-
+    : type(BLOCK), block(nullptr), leftChild(nullptr), rightChild(nullptr) {
 }
 
 SlicingTreeNode::SlicingTreeNode(int type, Block* block)
@@ -133,17 +132,16 @@ SlicingTreeNode::SlicingTreeNode(int type, Block* block)
 }
 
 SlicingTreeNode::~SlicingTreeNode() {
-        // Cleanup userData if it exists
-        if (userData) {
-            delete static_cast<std::vector<std::shared_ptr<SlicingTreeNode>>*>(userData);
-            userData = nullptr;
-        }
-    }
+    leftChild.reset();
+    rightChild.reset();
+}
 
 void SlicingTreeNode::updateShapeRecords() {
     shapeRecords.clear();
     
     if (type == HORIZONTAL_CUT) {
+        if (!leftChild || !rightChild) return;
+        
         // Sort by width (ascending order)
         auto compareWidth = [](const ShapeRecord& a, const ShapeRecord& b) -> bool {
             return a.width <= b.width;
@@ -173,6 +171,8 @@ void SlicingTreeNode::updateShapeRecords() {
             }
         }
     } else if (type == VERTICAL_CUT) {
+        if (!leftChild || !rightChild) return;
+        
         // Sort by height (descending order)
         auto compareHeight = [](const ShapeRecord& a, const ShapeRecord& b) -> bool {
             return a.height >= b.height;
@@ -266,7 +266,7 @@ bool FloorplanSolution::isValid() const {
 }
 
 void FloorplanSolution::applyFloorplanToBlocks() {
-    SlicingTreeNode* root = buildSlicingTree();
+    auto root = buildSlicingTree();
     
     // Find the best shape record that fits within the floorplan boundaries
     int floorplanWidth = data->getFloorplanWidth();
@@ -288,23 +288,23 @@ void FloorplanSolution::applyFloorplanToBlocks() {
     
     // Set block positions
     if (selectedRecord != -1) {
-        setBlockPositions(root, 0, 0, selectedRecord);
+        setBlockPositions(root.get(), 0, 0, selectedRecord);
     }
     
     // Clean up the slicing tree
-    delete root;
+    root.reset();
 }
 
-SlicingTreeNode* FloorplanSolution::buildSlicingTree() {
-    std::stack<SlicingTreeNode*> nodeStack;
+std::shared_ptr<SlicingTreeNode> FloorplanSolution::buildSlicingTree() {
+    std::stack<std::shared_ptr<SlicingTreeNode>> nodeStack;
     
     for (int id : polishExpression) {
         if (id >= 0) {  // Block
             Block* block = data->getBlock(id);
-            SlicingTreeNode* node = new SlicingTreeNode(SlicingTreeNode::BLOCK, block);
+            auto node = std::make_shared<SlicingTreeNode>(SlicingTreeNode::BLOCK, block);
             nodeStack.push(node);
         } else {  // Cut
-            SlicingTreeNode* node = new SlicingTreeNode(id, nullptr);
+            auto node = std::make_shared<SlicingTreeNode>(id, nullptr);
             
             // Pop the right and left children
             node->rightChild = nodeStack.top();
@@ -320,8 +320,7 @@ SlicingTreeNode* FloorplanSolution::buildSlicingTree() {
         }
     }
     
-    // The root of the slicing tree
-    return nodeStack.top();
+    return nodeStack.empty() ? nullptr : nodeStack.top();
 }
 
 void FloorplanSolution::setBlockPositions(SlicingTreeNode* node, int x, int y, int recordIndex) {
@@ -334,7 +333,7 @@ void FloorplanSolution::setBlockPositions(SlicingTreeNode* node, int x, int y, i
         node->block->updatePosition(x, y, record.width, record.height);
     } else {
         // Process children
-        setBlockPositions(node->leftChild, x, y, record.leftChoice);
+        setBlockPositions(node->leftChild.get(), x, y, record.leftChoice);
         
         if (node->type == SlicingTreeNode::HORIZONTAL_CUT) {
             // For horizontal cut, the right child is below the left child
@@ -344,6 +343,6 @@ void FloorplanSolution::setBlockPositions(SlicingTreeNode* node, int x, int y, i
             x += node->leftChild->shapeRecords[record.leftChoice].width;
         }
         
-        setBlockPositions(node->rightChild, x, y, record.rightChoice);
+        setBlockPositions(node->rightChild.get(), x, y, record.rightChoice);
     }
 }
