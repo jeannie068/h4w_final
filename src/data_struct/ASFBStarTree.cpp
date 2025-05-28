@@ -218,46 +218,108 @@ void ASFBStarTree::updateContour(int x, int y, int width, int height) {
  * Calculates the symmetry axis position based on the current placement
  * Optimized to minimize overall area while maintaining symmetry constraints
  */
+// Replace calculateSymmetryAxisPosition() in ASFBStarTree.cpp
 void ASFBStarTree::calculateSymmetryAxisPosition() {
-    Logger::log("Calculating optimal symmetry axis position");
-    
-    // First find the extent of all representative modules
-    int minX = std::numeric_limits<int>::max();
-    int maxX = std::numeric_limits<int>::min();
-    int minY = std::numeric_limits<int>::max();
-    int maxY = std::numeric_limits<int>::min();
-    
-    for (const auto& pair : representativeModules) {
-        const auto& module = modules[pair.first];
-        minX = std::min(minX, module->getX());
-        maxX = std::max(maxX, module->getX() + module->getWidth());
-        minY = std::min(minY, module->getY());
-        maxY = std::max(maxY, module->getY() + module->getHeight());
-    }
+    Logger::log("Calculating symmetry axis position with precise coordination");
     
     if (symmetryGroup->getType() == SymmetryType::VERTICAL) {
-        // For vertical symmetry, we want to place the axis immediately to the right
-        // of all the representative modules with minimal padding
-        int padding = 1; // Minimal padding
-        symmetryAxisPosition = maxX + padding;
-        
-        Logger::log("Set vertical symmetry axis at x=" + std::to_string(symmetryAxisPosition));
+        // For vertical symmetry, calculate axis based on existing symmetry pairs
+        if (!repToPairMap.empty()) {
+            // Use the first symmetry pair to determine the axis position
+            auto firstPair = repToPairMap.begin();
+            const std::string& repName = firstPair->first;
+            const std::string& symName = firstPair->second;
+            
+            std::shared_ptr<Module> repModule = modules[repName];
+            std::shared_ptr<Module> symModule = modules[symName];
+            
+            // Calculate centers of both modules
+            double repCenterX = repModule->getX() + repModule->getWidth() / 2.0;
+            double symCenterX = symModule->getX() + symModule->getWidth() / 2.0;
+            
+            // For vertical symmetry: repCenterX + symCenterX = 2 * axisX
+            // symmetryAxisPosition = (repCenterX + symCenterX) / 2.0;
+            symmetryAxisPosition = repModule->getX() + repModule->getWidth();
+            
+            Logger::log("Calculated axis from symmetry pair (" + repName + ", " + symName + "):");
+            Logger::log("  Rep center X: " + std::to_string(repCenterX));
+            Logger::log("  Sym center X: " + std::to_string(symCenterX));
+            Logger::log("  Axis X: " + std::to_string(symmetryAxisPosition));
+        } else if (!selfSymmetricModules.empty()) {
+            // If no symmetry pairs, position axis based on representative modules layout
+            int minX = std::numeric_limits<int>::max();
+            int maxX = std::numeric_limits<int>::min();
+            
+            for (const auto& pair : representativeModules) {
+                const auto& module = modules[pair.first];
+                minX = std::min(minX, module->getX());
+                maxX = std::max(maxX, module->getX() + module->getWidth());
+            }
+            
+            // Find the widest self-symmetric module to determine spacing
+            int maxSelfSymWidth = 0;
+            for (const auto& moduleName : selfSymmetricModules) {
+                auto module = modules[moduleName];
+                maxSelfSymWidth = std::max(maxSelfSymWidth, module->getWidth());
+            }
+            
+            // Position axis to allow symmetric placement
+            symmetryAxisPosition = maxX + (maxSelfSymWidth / 2.0) + 1;
+            
+            Logger::log("Calculated axis from layout bounds:");
+            Logger::log("  Layout max X: " + std::to_string(maxX));
+            Logger::log("  Max self-sym width: " + std::to_string(maxSelfSymWidth));
+            Logger::log("  Axis X: " + std::to_string(symmetryAxisPosition));
+        }
     } else {
-        // For horizontal symmetry, we want to place the axis immediately above
-        // all the representative modules with minimal padding
-        int padding = 1; // Minimal padding
-        symmetryAxisPosition = maxY + padding;
-        
-        Logger::log("Set horizontal symmetry axis at y=" + std::to_string(symmetryAxisPosition));
+        // For horizontal symmetry
+        if (!repToPairMap.empty()) {
+            auto firstPair = repToPairMap.begin();
+            const std::string& repName = firstPair->first;
+            const std::string& symName = firstPair->second;
+            
+            std::shared_ptr<Module> repModule = modules[repName];
+            std::shared_ptr<Module> symModule = modules[symName];
+            
+            double repCenterY = repModule->getY() + repModule->getHeight() / 2.0;
+            double symCenterY = symModule->getY() + symModule->getHeight() / 2.0;
+            
+            // symmetryAxisPosition = (repCenterY + symCenterY) / 2.0;
+            symmetryAxisPosition = repModule->getY() + repModule->getHeight();
+            
+            Logger::log("Calculated axis from symmetry pair (" + repName + ", " + symName + "):");
+            Logger::log("  Rep center Y: " + std::to_string(repCenterY));
+            Logger::log("  Sym center Y: " + std::to_string(symCenterY));
+            Logger::log("  Axis Y: " + std::to_string(symmetryAxisPosition));
+        } else if (!selfSymmetricModules.empty()) {
+            int minY = std::numeric_limits<int>::max();
+            int maxY = std::numeric_limits<int>::min();
+            
+            for (const auto& pair : representativeModules) {
+                const auto& module = modules[pair.first];
+                minY = std::min(minY, module->getY());
+                maxY = std::max(maxY, module->getY() + module->getHeight());
+            }
+            
+            int maxSelfSymHeight = 0;
+            for (const auto& moduleName : selfSymmetricModules) {
+                auto module = modules[moduleName];
+                maxSelfSymHeight = std::max(maxSelfSymHeight, module->getHeight());
+            }
+            
+            symmetryAxisPosition = maxY + (maxSelfSymHeight / 2.0) + 1;
+            
+            Logger::log("Calculated axis from layout bounds:");
+            Logger::log("  Layout max Y: " + std::to_string(maxY));
+            Logger::log("  Max self-sym height: " + std::to_string(maxSelfSymHeight));
+            Logger::log("  Axis Y: " + std::to_string(symmetryAxisPosition));
+        }
     }
     
     symmetryGroup->setAxisPosition(symmetryAxisPosition);
 }
 
-/**
- * Updates the positions of symmetric modules based on their representatives
- * Strictly following the paper's equations for symmetry constraints
- */
+// Replace updateSymmetricModulePositions() in ASFBStarTree.cpp
 void ASFBStarTree::updateSymmetricModulePositions() {
     // Make sure the symmetry axis is set
     if (symmetryAxisPosition < 0) {
@@ -266,7 +328,7 @@ void ASFBStarTree::updateSymmetricModulePositions() {
     
     Logger::log("Updating symmetric module positions with axis at " + std::to_string(symmetryAxisPosition));
     
-    // Update positions for symmetry pairs
+    // Update positions for symmetry pairs with dimension matching
     for (const auto& pair : repToPairMap) {
         const std::string& repName = pair.first;
         const std::string& symName = pair.second;
@@ -274,68 +336,178 @@ void ASFBStarTree::updateSymmetricModulePositions() {
         std::shared_ptr<Module> repModule = modules[repName];
         std::shared_ptr<Module> symModule = modules[symName];
         
-        if (symmetryGroup->getType() == SymmetryType::VERTICAL) {
-            // For vertical symmetry: x_j + x'_j = 2 × x̂_i and y_j = y'_j
+        // Ensure dimensions match between symmetry pair
+        bool needsRotation = false;
+        if (repModule->getWidth() != symModule->getWidth() || 
+            repModule->getHeight() != symModule->getHeight()) {
             
-            // For exact symmetry, we place the symmetric module by reflecting across the axis
-            int repCenterX = repModule->getX() + repModule->getWidth() / 2;
-            int distanceFromAxis = symmetryAxisPosition - repCenterX;
-            int symCenterX = symmetryAxisPosition + distanceFromAxis;
-            
-            // Calculate top-left corner of symmetric module
-            int symX = symCenterX - symModule->getWidth() / 2;
-            int symY = repModule->getY(); // Same Y for vertical symmetry
-            
-            symModule->setPosition(symX, symY);
-            
-            Logger::log("Vertical symmetry: " + repName + " at (" + std::to_string(repModule->getX()) + 
-                       ", " + std::to_string(repModule->getY()) + ") -> " + symName + " at (" + 
-                       std::to_string(symX) + ", " + std::to_string(symY) + ")");
-        } else {
-            // For horizontal symmetry: x_j = x'_j and y_j + y'_j = 2 × ŷ_i
-            
-            // For exact symmetry, we place the symmetric module by reflecting across the axis
-            int repCenterY = repModule->getY() + repModule->getHeight() / 2;
-            int distanceFromAxis = symmetryAxisPosition - repCenterY;
-            int symCenterY = symmetryAxisPosition + distanceFromAxis;
-            
-            // Calculate top-left corner of symmetric module
-            int symX = repModule->getX(); // Same X for horizontal symmetry
-            int symY = symCenterY - symModule->getHeight() / 2;
-            
-            symModule->setPosition(symX, symY);
-            
-            Logger::log("Horizontal symmetry: " + repName + " at (" + std::to_string(repModule->getX()) + 
-                       ", " + std::to_string(repModule->getY()) + ") -> " + symName + " at (" + 
-                       std::to_string(symX) + ", " + std::to_string(symY) + ")");
+            // Check if rotating the symmetric module makes dimensions match
+            if (repModule->getWidth() == symModule->getHeight() && 
+                repModule->getHeight() == symModule->getWidth()) {
+                symModule->rotate();
+                needsRotation = true;
+                Logger::log("Rotated " + symName + " to match dimensions of " + repName);
+            } else {
+                Logger::log("WARNING: Dimension mismatch between " + repName + " and " + symName + 
+                           " cannot be resolved by rotation");
+            }
         }
         
-        // Ensure rotation is consistent
-        symModule->setRotation(repModule->getRotated());
+        if (symmetryGroup->getType() == SymmetryType::VERTICAL) {
+            // For vertical symmetry: x_center1 + x_center2 = 2 × axis_x, y1 = y2
+            
+            // Calculate representative module center
+            double repCenterX = repModule->getX() + repModule->getWidth() / 2.0;
+            
+            // Calculate symmetric module center position
+            double symCenterX = 2.0 * symmetryAxisPosition - repCenterX;
+            
+            // Calculate symmetric module position (top-left corner)
+            double symX = symCenterX - symModule->getWidth() / 2.0;
+            int symXInt = static_cast<int>(std::round(symX));
+            int symY = repModule->getY(); // Same Y for vertical symmetry
+            
+            symModule->setPosition(symXInt, symY);
+            
+            // Verify the result
+            double actualSymCenterX = symXInt + symModule->getWidth() / 2.0;
+            double actualSum = repCenterX + actualSymCenterX;
+            double expectedSum = 2.0 * symmetryAxisPosition;
+            double error = std::abs(actualSum - expectedSum);
+            
+            Logger::log("Vertical symmetry pair (" + repName + ", " + symName + "):");
+            Logger::log("  Rep center X: " + std::to_string(repCenterX));
+            Logger::log("  Target sym center X: " + std::to_string(symCenterX));
+            Logger::log("  Actual sym center X: " + std::to_string(actualSymCenterX));
+            Logger::log("  Expected sum: " + std::to_string(expectedSum));
+            Logger::log("  Actual sum: " + std::to_string(actualSum));
+            Logger::log("  Error: " + std::to_string(error));
+            
+        } else {
+            // For horizontal symmetry: x1 = x2, y_center1 + y_center2 = 2 × axis_y
+            
+            double repCenterY = repModule->getY() + repModule->getHeight() / 2.0;
+            double symCenterY = 2.0 * symmetryAxisPosition - repCenterY;
+            
+            double symY = symCenterY - symModule->getHeight() / 2.0;
+            int symYInt = static_cast<int>(std::round(symY));
+            int symX = repModule->getX(); // Same X for horizontal symmetry
+            
+            symModule->setPosition(symX, symYInt);
+            
+            // Verify the result
+            double actualSymCenterY = symYInt + symModule->getHeight() / 2.0;
+            double actualSum = repCenterY + actualSymCenterY;
+            double expectedSum = 2.0 * symmetryAxisPosition;
+            double error = std::abs(actualSum - expectedSum);
+            
+            Logger::log("Horizontal symmetry pair (" + repName + ", " + symName + "):");
+            Logger::log("  Rep center Y: " + std::to_string(repCenterY));
+            Logger::log("  Target sym center Y: " + std::to_string(symCenterY));
+            Logger::log("  Actual sym center Y: " + std::to_string(actualSymCenterY));
+            Logger::log("  Expected sum: " + std::to_string(expectedSum));
+            Logger::log("  Actual sum: " + std::to_string(actualSum));
+            Logger::log("  Error: " + std::to_string(error));
+        }
+        
+        // Ensure rotation status matches if dimensions were originally the same
+        if (!needsRotation) {
+            symModule->setRotation(repModule->getRotated());
+        }
     }
     
-    // Handle self-symmetric modules
+    // Handle self-symmetric modules with precise centering
     for (const auto& moduleName : selfSymmetricModules) {
         auto module = modules[moduleName];
         
         if (symmetryGroup->getType() == SymmetryType::VERTICAL) {
-            // For vertical symmetry, center the module on the axis
+            // For vertical symmetry, center the module exactly on the axis
             int moduleWidth = module->getWidth();
-            int moduleX = symmetryAxisPosition - moduleWidth / 2;
+            
+            // Calculate the exact position needed to center the module on the axis
+            // axis_position = module_left + module_width/2
+            // Therefore: module_left = axis_position - module_width/2
+            double exactLeft = symmetryAxisPosition - (moduleWidth / 2.0);
+            
+            // Use proper rounding to get the closest integer position
+            int moduleX = static_cast<int>(std::round(exactLeft));
+            
+            // Calculate the resulting center and check if we can do better
+            double resultingCenterX = moduleX + (moduleWidth / 2.0);
+            double centerError = std::abs(resultingCenterX - symmetryAxisPosition);
+            
+            // If there's still significant error, try the adjacent positions
+            if (centerError > 0.25) { // More strict tolerance
+                int altX1 = moduleX - 1;
+                int altX2 = moduleX + 1;
+                
+                double altCenter1 = altX1 + (moduleWidth / 2.0);
+                double altCenter2 = altX2 + (moduleWidth / 2.0);
+                
+                double altError1 = std::abs(altCenter1 - symmetryAxisPosition);
+                double altError2 = std::abs(altCenter2 - symmetryAxisPosition);
+                
+                if (altError1 < centerError && altError1 < altError2) {
+                    moduleX = altX1;
+                    resultingCenterX = altCenter1;
+                    centerError = altError1;
+                } else if (altError2 < centerError) {
+                    moduleX = altX2;
+                    resultingCenterX = altCenter2;
+                    centerError = altError2;
+                }
+            }
             
             module->setPosition(moduleX, module->getY());
             
-            Logger::log("Self-symmetric module " + moduleName + " centered on vertical axis at x=" + 
-                       std::to_string(moduleX));
+            Logger::log("Self-symmetric module " + moduleName + " (vertical):");
+            Logger::log("  Target axis X: " + std::to_string(symmetryAxisPosition));
+            Logger::log("  Module width: " + std::to_string(moduleWidth));
+            Logger::log("  Calculated exact left: " + std::to_string(exactLeft));
+            Logger::log("  Final position X: " + std::to_string(moduleX));
+            Logger::log("  Resulting center X: " + std::to_string(resultingCenterX));
+            Logger::log("  Center error: " + std::to_string(centerError));
+            
         } else {
-            // For horizontal symmetry, center the module on the axis
+            // For horizontal symmetry, center the module exactly on the axis
             int moduleHeight = module->getHeight();
-            int moduleY = symmetryAxisPosition - moduleHeight / 2;
+            
+            double exactTop = symmetryAxisPosition - (moduleHeight / 2.0);
+            int moduleY = static_cast<int>(std::round(exactTop));
+            
+            double resultingCenterY = moduleY + (moduleHeight / 2.0);
+            double centerError = std::abs(resultingCenterY - symmetryAxisPosition);
+            
+            if (centerError > 0.25) {
+                int altY1 = moduleY - 1;
+                int altY2 = moduleY + 1;
+                
+                double altCenter1 = altY1 + (moduleHeight / 2.0);
+                double altCenter2 = altY2 + (moduleHeight / 2.0);
+                
+                double altError1 = std::abs(altCenter1 - symmetryAxisPosition);
+                double altError2 = std::abs(altCenter2 - symmetryAxisPosition);
+                
+                if (altError1 < centerError && altError1 < altError2) {
+                    moduleY = altY1;
+                    resultingCenterY = altCenter1;
+                    centerError = altError1;
+                } else if (altError2 < centerError) {
+                    moduleY = altY2;
+                    resultingCenterY = altCenter2;
+                    centerError = altError2;
+                }
+            }
             
             module->setPosition(module->getX(), moduleY);
             
-            Logger::log("Self-symmetric module " + moduleName + " centered on horizontal axis at y=" + 
-                       std::to_string(moduleY));
+            Logger::log("Self-symmetric module " + moduleName + " (horizontal):");
+            Logger::log("  Target axis Y: " + std::to_string(symmetryAxisPosition));
+            Logger::log("  Module height: " + std::to_string(moduleHeight));
+            Logger::log("  Calculated exact top: " + std::to_string(exactTop));
+            Logger::log("  Final position Y: " + std::to_string(moduleY));
+            Logger::log("  Resulting center Y: " + std::to_string(resultingCenterY));
+            Logger::log("  Center error: " + std::to_string(centerError));
         }
     }
 }
