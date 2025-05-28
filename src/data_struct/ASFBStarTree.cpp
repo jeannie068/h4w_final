@@ -213,38 +213,63 @@ void ASFBStarTree::updateContour(int x, int y, int width, int height) {
     }
 }
 
-
 /**
  * Calculates the symmetry axis position based on the current placement
- * Optimized to minimize overall area while maintaining symmetry constraints
+ * Fixed to ensure all symmetric modules have positive coordinates
  */
-// Replace calculateSymmetryAxisPosition() in ASFBStarTree.cpp
 void ASFBStarTree::calculateSymmetryAxisPosition() {
-    Logger::log("Calculating symmetry axis position with precise coordination");
+    Logger::log("Calculating symmetry axis position with positive coordinate guarantee");
     
     if (symmetryGroup->getType() == SymmetryType::VERTICAL) {
-        // For vertical symmetry, calculate axis based on existing symmetry pairs
+        // For vertical symmetry, find the optimal axis position
         if (!repToPairMap.empty()) {
-            // Use the first symmetry pair to determine the axis position
-            auto firstPair = repToPairMap.begin();
-            const std::string& repName = firstPair->first;
-            const std::string& symName = firstPair->second;
+            // Find the rightmost representative module to determine minimum axis position
+            double maxRepRightEdge = std::numeric_limits<double>::min();
+            double minSymLeftEdge = std::numeric_limits<double>::max();
             
-            std::shared_ptr<Module> repModule = modules[repName];
-            std::shared_ptr<Module> symModule = modules[symName];
+            // First pass: find the bounds of representative modules
+            for (const auto& pair : repToPairMap) {
+                const std::string& repName = pair.first;
+                std::shared_ptr<Module> repModule = modules[repName];
+                
+                double repRightEdge = repModule->getX() + repModule->getWidth();
+                maxRepRightEdge = std::max(maxRepRightEdge, repRightEdge);
+            }
             
-            // Calculate centers of both modules
-            double repCenterX = repModule->getX() + repModule->getWidth() / 2.0;
-            double symCenterX = symModule->getX() + symModule->getWidth() / 2.0;
+            // Second pass: calculate minimum axis position needed for positive coordinates
+            double minAxisPosition = maxRepRightEdge; // Start with rightmost rep edge
             
-            // For vertical symmetry: repCenterX + symCenterX = 2 * axisX
-            // symmetryAxisPosition = (repCenterX + symCenterX) / 2.0;
-            symmetryAxisPosition = repModule->getX() + repModule->getWidth();
+            for (const auto& pair : repToPairMap) {
+                const std::string& repName = pair.first;
+                const std::string& symName = pair.second;
+                
+                std::shared_ptr<Module> repModule = modules[repName];
+                std::shared_ptr<Module> symModule = modules[symName];
+                
+                double repCenterX = repModule->getX() + repModule->getWidth() / 2.0;
+                
+                // For symmetric module to have positive coordinates:
+                // symCenterX = 2 * axis - repCenterX >= symWidth/2
+                // Therefore: axis >= (repCenterX + symWidth/2) / 2
+                double minAxisForThisPair = (repCenterX + symModule->getWidth() / 2.0) / 2.0;
+                
+                // But we also need: symLeftEdge = symCenterX - symWidth/2 >= 0
+                // symCenterX = 2 * axis - repCenterX
+                // So: 2 * axis - repCenterX - symWidth/2 >= 0
+                // Therefore: axis >= (repCenterX + symWidth/2) / 2
+                double minAxisForPositiveCoords = (repCenterX + symModule->getWidth() / 2.0) / 2.0;
+                
+                minAxisPosition = std::max(minAxisPosition, minAxisForPositiveCoords);
+            }
             
-            Logger::log("Calculated axis from symmetry pair (" + repName + ", " + symName + "):");
-            Logger::log("  Rep center X: " + std::to_string(repCenterX));
-            Logger::log("  Sym center X: " + std::to_string(symCenterX));
-            Logger::log("  Axis X: " + std::to_string(symmetryAxisPosition));
+            // Add a small buffer to ensure positive coordinates
+            symmetryAxisPosition = minAxisPosition + 1.0;
+            
+            Logger::log("Calculated axis position to ensure positive coordinates:");
+            Logger::log("  Max rep right edge: " + std::to_string(maxRepRightEdge));
+            Logger::log("  Min axis position needed: " + std::to_string(minAxisPosition));
+            Logger::log("  Final axis X: " + std::to_string(symmetryAxisPosition));
+            
         } else if (!selfSymmetricModules.empty()) {
             // If no symmetry pairs, position axis based on representative modules layout
             int minX = std::numeric_limits<int>::max();
@@ -274,23 +299,46 @@ void ASFBStarTree::calculateSymmetryAxisPosition() {
     } else {
         // For horizontal symmetry
         if (!repToPairMap.empty()) {
-            auto firstPair = repToPairMap.begin();
-            const std::string& repName = firstPair->first;
-            const std::string& symName = firstPair->second;
+            // Find the bottommost representative module to determine minimum axis position
+            double maxRepBottomEdge = std::numeric_limits<double>::min();
             
-            std::shared_ptr<Module> repModule = modules[repName];
-            std::shared_ptr<Module> symModule = modules[symName];
+            // First pass: find the bounds of representative modules
+            for (const auto& pair : repToPairMap) {
+                const std::string& repName = pair.first;
+                std::shared_ptr<Module> repModule = modules[repName];
+                
+                double repBottomEdge = repModule->getY() + repModule->getHeight();
+                maxRepBottomEdge = std::max(maxRepBottomEdge, repBottomEdge);
+            }
             
-            double repCenterY = repModule->getY() + repModule->getHeight() / 2.0;
-            double symCenterY = symModule->getY() + symModule->getHeight() / 2.0;
+            // Second pass: calculate minimum axis position needed for positive coordinates
+            double minAxisPosition = maxRepBottomEdge; // Start with bottommost rep edge
             
-            // symmetryAxisPosition = (repCenterY + symCenterY) / 2.0;
-            symmetryAxisPosition = repModule->getY() + repModule->getHeight();
+            for (const auto& pair : repToPairMap) {
+                const std::string& repName = pair.first;
+                const std::string& symName = pair.second;
+                
+                std::shared_ptr<Module> repModule = modules[repName];
+                std::shared_ptr<Module> symModule = modules[symName];
+                
+                double repCenterY = repModule->getY() + repModule->getHeight() / 2.0;
+                
+                // For symmetric module to have positive coordinates:
+                // symCenterY = 2 * axis - repCenterY >= symHeight/2
+                // Therefore: axis >= (repCenterY + symHeight/2) / 2
+                double minAxisForPositiveCoords = (repCenterY + symModule->getHeight() / 2.0) / 2.0;
+                
+                minAxisPosition = std::max(minAxisPosition, minAxisForPositiveCoords);
+            }
             
-            Logger::log("Calculated axis from symmetry pair (" + repName + ", " + symName + "):");
-            Logger::log("  Rep center Y: " + std::to_string(repCenterY));
-            Logger::log("  Sym center Y: " + std::to_string(symCenterY));
-            Logger::log("  Axis Y: " + std::to_string(symmetryAxisPosition));
+            // Add a small buffer to ensure positive coordinates
+            symmetryAxisPosition = minAxisPosition + 1.0;
+            
+            Logger::log("Calculated axis position to ensure positive coordinates:");
+            Logger::log("  Max rep bottom edge: " + std::to_string(maxRepBottomEdge));
+            Logger::log("  Min axis position needed: " + std::to_string(minAxisPosition));
+            Logger::log("  Final axis Y: " + std::to_string(symmetryAxisPosition));
+            
         } else if (!selfSymmetricModules.empty()) {
             int minY = std::numeric_limits<int>::max();
             int maxY = std::numeric_limits<int>::min();
